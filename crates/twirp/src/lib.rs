@@ -2,12 +2,14 @@ pub mod client;
 pub mod context;
 pub mod error;
 pub mod headers;
+#[cfg(feature = "server")]
 pub mod server;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test;
 
 #[doc(hidden)]
+#[cfg(feature = "server")]
 pub mod details;
 
 pub use client::{Client, ClientBuilder, ClientError, Middleware, Next, Result};
@@ -19,13 +21,16 @@ pub use http::Extensions;
 // import the exact versions of these libraries `twirp` is built with -- useful if your project is
 // so sprawling that it builds multiple versions of some crates.
 pub use async_trait;
+#[cfg(feature = "server")]
 pub use axum;
 pub use reqwest;
+#[cfg(feature = "server")]
 pub use tower;
 pub use url;
 
 /// Re-export of `axum::Router`, the type that encapsulates a server-side implementation of a Twirp
 /// service.
+#[cfg(feature = "server")]
 pub use axum::Router;
 
 pub(crate) fn serialize_proto_message<T>(m: T) -> Vec<u8>

@@ -206,24 +206,60 @@ impl Client {
     }
 }
 
-// This concept of reqwest middleware is taken pretty much directly from:
-// https://github.com/TrueLayer/reqwest-middleware, but simplified for the
-// specific needs of this twirp client.
-#[async_trait]
-pub trait Middleware: 'static + Send + Sync {
-    async fn handle(&self, mut req: reqwest::Request, next: Next<'_>) -> Result<reqwest::Response>;
+#[cfg(target_family = "wasm")]
+pub use wasm_middleware::Middleware;
+
+#[cfg(target_family = "wasm")]
+mod wasm_middleware {
+    use super::*;
+
+    // This concept of reqwest middleware is taken pretty much directly from:
+    // https://github.com/TrueLayer/reqwest-middleware, but simplified for the
+    // specific needs of this twirp client.
+    #[async_trait(?Send)]
+    pub trait Middleware: 'static + Sync {
+        async fn handle(&self, mut req: reqwest::Request, next: Next<'_>) -> Result<reqwest::Response>;
+    }
+
+    #[async_trait(?Send)]
+    impl<F> Middleware for F
+    where
+        F: Sync
+            + 'static
+            + for<'a> Fn(reqwest::Request, Next<'a>) -> BoxFuture<'a, Result<reqwest::Response>>,
+    {
+        async fn handle(&self, req: reqwest::Request, next: Next<'_>) -> Result<reqwest::Response> {
+            (self)(req, next).await
+        }
+    }
 }
 
-#[async_trait]
-impl<F> Middleware for F
-where
-    F: Send
-        + Sync
-        + 'static
-        + for<'a> Fn(reqwest::Request, Next<'a>) -> BoxFuture<'a, Result<reqwest::Response>>,
-{
-    async fn handle(&self, req: reqwest::Request, next: Next<'_>) -> Result<reqwest::Response> {
-        (self)(req, next).await
+#[cfg(not(target_family = "wasm"))]
+pub use send_middlewares::Middleware;
+
+#[cfg(not(target_family = "wasm"))]
+mod send_middlewares {
+    use super::*;
+
+    // This concept of reqwest middleware is taken pretty much directly from:
+    // https://github.com/TrueLayer/reqwest-middleware, but simplified for the
+    // specific needs of this twirp client.
+    #[async_trait]
+    pub trait Middleware: 'static + Send + Sync {
+        async fn handle(&self, mut req: reqwest::Request, next: Next<'_>) -> Result<reqwest::Response>;
+    }
+
+    #[async_trait]
+    impl<F> Middleware for F
+    where
+        F: Send
+            + Sync
+            + 'static
+            + for<'a> Fn(reqwest::Request, Next<'a>) -> BoxFuture<'a, Result<reqwest::Response>>,
+    {
+        async fn handle(&self, req: reqwest::Request, next: Next<'_>) -> Result<reqwest::Response> {
+            (self)(req, next).await
+        }
     }
 }
 
@@ -233,7 +269,11 @@ pub struct Next<'a> {
     middlewares: &'a [Box<dyn Middleware>],
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
+
+#[cfg(target_family = "wasm")]
+pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
 
 impl<'a> Next<'a> {
     pub(crate) fn new(client: &'a reqwest::Client, middlewares: &'a [Box<dyn Middleware>]) -> Self {
